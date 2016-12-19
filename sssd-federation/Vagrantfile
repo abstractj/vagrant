@@ -1,0 +1,63 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# All Vagrant configuration is done below. The "2" in Vagrant.configure
+# configures the configuration version (we support older styles for
+# backwards compatibility). Please don't change it unless you know what
+# you're doing.
+Vagrant.configure("2") do |config|
+  # The most common configuration options are documented and commented below.
+  # For a complete reference, please see the online documentation at
+  # https://docs.vagrantup.com.
+
+  # Every Vagrant development environment requires a box. You can search for
+  # boxes at https://atlas.hashicorp.com/search.
+  config.vm.box = "abstractj/rhel7.2_IdM"
+
+  config.vbguest.auto_update = false
+
+  config.vm.provider "virtualbox" do |vb|
+    # Customize the amount of memory on the VM:
+    vb.memory = "4096"
+  end
+
+  # Vagrant's "change host name" sets the short host name.  Before
+  # we repair /etc/hosts (see below) let's reset /etc/hostname to
+  # the *full* host name
+  #
+  config.vm.provision "shell",
+    inline: "hostname --fqdn > /etc/hostname && hostname -F /etc/hostname"
+
+  config.vm.provision "shell", inline: <<-SHELL
+    if grep -nq test.local "/etc/hosts"; then
+       echo "nameserver 192.168.33.10" > /etc/resolv.conf
+       echo "192.168.33.10    ipa.test.local"      | tee -a /etc/hosts
+       echo "192.168.33.11    keycloak.test.local" | tee -a /etc/hosts
+    fi
+  SHELL
+
+
+
+  # Vagrant's "change host name" capability for Fedora maps hostname
+  # to loopback.  We must repair /etc/hosts
+  #
+  config.vm.provision "shell",
+    inline: "sed -ri 's/127\.0\.0\.1\s.*/127.0.0.1 localhost localhost.localdomain/' /etc/hosts"
+
+  config.vm.define "ipa" do |ipa|
+    ipa.vm.network "private_network", ip: "192.168.33.10"
+    ipa.vm.hostname = "ipa.test.local"
+    ipa.vm.provision :shell, privileged:true, :path => "scripts/server.sh"
+  end
+
+  config.vm.define "keycloak" do |keycloak|
+    keycloak.vm.network "private_network", ip: "192.168.33.11"
+    keycloak.vm.hostname = "keycloak.test.local"
+    keycloak.vm.provision :shell, privileged:true, :path => "scripts/client.sh"
+
+    keycloak.vm.synced_folder "/home/abstractj/opensource/keycloak/keycloak-repo", "/home/vagrant/keycloak-repo"
+    keycloak.vm.synced_folder "/home/abstractj/.m2/", "/home/vagrant/.m2"
+    keycloak.vm.provision :shell, :path => "scripts/keycloak-integration-tests"
+
+  end
+end
